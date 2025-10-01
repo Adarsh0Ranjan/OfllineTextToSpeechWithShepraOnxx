@@ -4,11 +4,12 @@ import Combine
 
 class TtsManager: ObservableObject {
     @Published var status: String = "Ready"
+    @Published var availableVoices: [Int32] = []
+
     private var audioEngine: AVAudioEngine?
     private var playerNode: AVAudioPlayerNode?
     private var tts: OpaquePointer?
     private var isInitialized = false
-    private var audioFormat: AVAudioFormat?
     private var isPlayerConnected = false
 
     init() {
@@ -19,11 +20,8 @@ class TtsManager: ObservableObject {
     private func setupAudioEngine() {
         audioEngine = AVAudioEngine()
         playerNode = AVAudioPlayerNode()
-
         guard let engine = audioEngine, let player = playerNode else { return }
-
         engine.attach(player)
-        // Don't start engine yet - will start when first audio is played
     }
 
     private func initializeTTS() {
@@ -80,8 +78,8 @@ class TtsManager: ObservableObject {
 
                             var modelConfig = SherpaOnnxOfflineTtsModelConfig(
                                 vits: SherpaOnnxOfflineTtsVitsModelConfig(),
-                                num_threads: 2, // Increased threads
-                                debug: 0, // Disable debug for performance
+                                num_threads: 2,
+                                debug: 0,
                                 provider: "cpu",
                                 matcha: SherpaOnnxOfflineTtsMatchaModelConfig(),
                                 kokoro: SherpaOnnxOfflineTtsKokoroModelConfig(),
@@ -94,15 +92,21 @@ class TtsManager: ObservableObject {
                                 rule_fsts: nil,
                                 max_num_sentences: 1,
                                 rule_fars: nil,
-                                silence_scale: 0.5 // Reduced silence
+                                silence_scale: 0.5
                             )
 
                             self.tts = SherpaOnnxCreateOfflineTts(&ttsConfig)
 
                             if self.tts != nil {
                                 self.isInitialized = true
+
+                                // Get number of available speakers
+                                let numSpeakers = SherpaOnnxOfflineTtsNumSpeakers(self.tts)
+                                print("Available speakers: \(numSpeakers)")
+
                                 DispatchQueue.main.async {
-                                    self.status = "Ready (optimized)"
+                                    self.availableVoices = Array(0..<numSpeakers)
+                                    self.status = "Ready - \(numSpeakers) voices available"
                                 }
                             } else {
                                 DispatchQueue.main.async {
@@ -116,17 +120,16 @@ class TtsManager: ObservableObject {
         }
     }
 
-    func synthesizeText(_ text: String) {
+    func synthesizeText(_ text: String, voiceId: Int32 = 0, speed: Float = 1.0) {
         guard isInitialized, let tts = tts else {
             status = "TTS not initialized"
             return
         }
 
         DispatchQueue.main.async {
-            self.status = "Synthesizing..."
+            self.status = "Synthesizing with voice \(voiceId)..."
         }
 
-        // Split text into sentences for streaming
         let sentences = text.components(separatedBy: CharacterSet(charactersIn: ".!?\n"))
             .map { $0.trimmingCharacters(in: .whitespaces) }
             .filter { !$0.isEmpty }
@@ -139,10 +142,7 @@ class TtsManager: ObservableObject {
             for (index, sentence) in sentences.enumerated() {
                 if sentence.isEmpty { continue }
 
-                let speakerId: Int32 = 0
-                let speed: Float = 1.1 // Slightly faster for lower latency
-
-                guard let generatedAudio = SherpaOnnxOfflineTtsGenerate(tts, sentence, speakerId, speed) else {
+                guard let generatedAudio = SherpaOnnxOfflineTtsGenerate(tts, sentence, voiceId, speed) else {
                     continue
                 }
 
@@ -150,13 +150,12 @@ class TtsManager: ObservableObject {
                 let sampleRate = generatedAudio.pointee.sample_rate
 
                 if let samples = generatedAudio.pointee.samples {
-                    // Play immediately without converting to file
                     self.playAudioStream(from: samples, count: Int(sampleCount), sampleRate: sampleRate)
 
                     if index == 0 {
                         let latency = Date().timeIntervalSince(startTime)
                         DispatchQueue.main.async {
-                            self.status = "Playing (latency: \(String(format: "%.2f", latency))s)"
+                            self.status = "Voice \(voiceId) (latency: \(String(format: "%.2f", latency))s)"
                         }
                     }
                 }
@@ -164,9 +163,8 @@ class TtsManager: ObservableObject {
                 SherpaOnnxDestroyOfflineTtsGeneratedAudio(generatedAudio)
             }
 
-            let totalTime = Date().timeIntervalSince(startTime)
             DispatchQueue.main.async {
-                self.status = "Complete (\(String(format: "%.2f", totalTime))s total)"
+                self.status = "Ready - \(self.availableVoices.count) voices available"
             }
         }
     }
@@ -176,16 +174,14 @@ class TtsManager: ObservableObject {
 
         let format = AVAudioFormat(standardFormatWithSampleRate: Double(sampleRate), channels: 1)!
 
-        // Connect and start engine on first use
         if !isPlayerConnected {
             engine.connect(player, to: engine.mainMixerNode, format: format)
             isPlayerConnected = true
-            audioFormat = format
 
             do {
                 try engine.start()
             } catch {
-                print("❌ Failed to start audio engine: \(error)")
+                print("Failed to start audio engine: \(error)")
                 return
             }
         }
@@ -196,14 +192,12 @@ class TtsManager: ObservableObject {
 
         buffer.frameLength = UInt32(count)
 
-        // Copy samples to buffer
         if let channelData = buffer.floatChannelData {
             for i in 0..<count {
                 channelData[0][i] = samples[i]
             }
         }
 
-        // Schedule and play
         player.scheduleBuffer(buffer, completionHandler: nil)
 
         if !player.isPlaying {
@@ -221,53 +215,81 @@ class TtsManager: ObservableObject {
 
 struct ContentView: View {
     @StateObject private var ttsManager = TtsManager()
-    @State private var inputText = """
-KL Rahul is one of India’s most stylish batsmen.  
-Born in Bengaluru, he developed his game at the KSCA.  
-He made his Test debut in 2014 at the MCG.  
-Rahul scored his first Test century at Sydney in 2015.  
-He is known for his elegant stroke play.  
-Rahul has represented India in all three formats.  
-In the IPL, he has been a consistent run-scorer.  
-He has led Punjab Kings as captain in the IPL.  
-Rahul is admired for his calm temperament.  
-He can open the innings or play in the middle order.  
-Rahul’s wicketkeeping adds versatility to the team.  
-He has scored centuries in Tests, ODIs, and T20Is.  
-His cover drives are a delight to watch.  
-Rahul has a reputation for timing the ball beautifully.  
-He has rescued India on many tough occasions.  
-Fitness and discipline are key parts of his routine.  
-Rahul is also a reliable finisher in white-ball cricket.  
-Fans value his adaptability across conditions.  
-He remains one of India’s most dependable players.  
-KL Rahul continues to inspire the next generation.
-"""
-
+    @State private var selectedVoice: Int32 = 0
+    @State private var speechSpeed: Float = 1.0
+    @State private var inputText = "Hello! This is a test of text to speech. I am testing different voices."
 
     var body: some View {
         VStack(spacing: 20) {
+            Text("TTS Voice Tester")
+                .font(.title)
+                .bold()
+
+            // Voice selector
+            if !ttsManager.availableVoices.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Voice Selection")
+                        .font(.headline)
+
+                    Picker("Voice", selection: $selectedVoice) {
+                        ForEach(ttsManager.availableVoices, id: \.self) { voiceId in
+                            Text("Voice \(voiceId)").tag(voiceId)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                }
+                .padding(.horizontal)
+            }
+
+            // Speed control
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Speed: \(String(format: "%.1f", speechSpeed))x")
+                    .font(.headline)
+
+                Slider(value: $speechSpeed, in: 0.5...2.0, step: 0.1)
+            }
+            .padding(.horizontal)
+
+            // Text input
             TextEditor(text: $inputText)
-                .frame(height: 150)
+                .frame(height: 100)
                 .padding(4)
                 .overlay(
                     RoundedRectangle(cornerRadius: 8)
                         .stroke(Color.gray.opacity(0.5), lineWidth: 1)
                 )
+                .padding(.horizontal)
 
+            // Speak button
             Button("Speak") {
-                ttsManager.synthesizeText(inputText)
+                ttsManager.synthesizeText(inputText, voiceId: selectedVoice, speed: speechSpeed)
             }
             .padding()
             .frame(maxWidth: .infinity)
             .background(Color.blue)
             .foregroundColor(.white)
             .cornerRadius(10)
+            .padding(.horizontal)
+
+            // Quick test buttons
+            HStack(spacing: 12) {
+                ForEach(ttsManager.availableVoices.prefix(4), id: \.self) { voiceId in
+                    Button("Test \(voiceId)") {
+                        ttsManager.synthesizeText("This is voice number \(voiceId).", voiceId: voiceId, speed: speechSpeed)
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .background(Color.green.opacity(0.2))
+                    .cornerRadius(8)
+                }
+            }
 
             Text(ttsManager.status)
                 .padding()
                 .multilineTextAlignment(.center)
                 .foregroundColor(.secondary)
+
+            Spacer()
         }
         .padding()
     }
