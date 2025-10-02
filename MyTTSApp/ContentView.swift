@@ -30,9 +30,9 @@ class TtsManager: ObservableObject {
 
             DispatchQueue.main.async { self.status = "Loading model..." }
 
-            let modelURL = Bundle.main.url(forResource: "model.fp16", withExtension: "onnx")
-            let tokensURL = Bundle.main.url(forResource: "tokens", withExtension: "txt")
-            let voicesURL = Bundle.main.url(forResource: "voices", withExtension: "bin")
+            let modelURL = Bundle.main.url(forResource: "model_english", withExtension: "onnx")
+            let tokensURL = Bundle.main.url(forResource: "tokens_english", withExtension: "txt")
+            let voicesURL = Bundle.main.url(forResource: "voices_english", withExtension: "bin")
 
             guard let resourcePath = Bundle.main.resourceURL else {
                 DispatchQueue.main.async { self.status = "Failed to get resource path" }
@@ -42,8 +42,8 @@ class TtsManager: ObservableObject {
             let espeakDataURL = resourcePath.appendingPathComponent("espeak-ng-data")
 
             var missingFiles: [String] = []
-            if modelURL == nil { missingFiles.append("model.fp16.onnx") }
-            if tokensURL == nil { missingFiles.append("tokens.txt") }
+            if modelURL == nil { missingFiles.append("model.onnx") }
+            if tokensURL == nil { missingFiles.append("tokens") }
             if voicesURL == nil { missingFiles.append("voices.bin") }
 
             var isDirectory: ObjCBool = false
@@ -68,12 +68,14 @@ class TtsManager: ObservableObject {
                     tokensPath.withCString { cTokensPath in
                         voicesPath.withCString { cVoicesPath in
 
-                            var kittenConfig = SherpaOnnxOfflineTtsKittenModelConfig(
+                            var kokoroConfig = SherpaOnnxOfflineTtsKokoroModelConfig(
                                 model: cModelPath,
                                 voices: cVoicesPath,
                                 tokens: cTokensPath,
                                 data_dir: cEspeakDataPath,
-                                length_scale: 1.0
+                                length_scale: 1.0, dict_dir: nil,
+                                lexicon: nil,
+                                lang: nil
                             )
 
                             var modelConfig = SherpaOnnxOfflineTtsModelConfig(
@@ -82,8 +84,8 @@ class TtsManager: ObservableObject {
                                 debug: 0,
                                 provider: "cpu",
                                 matcha: SherpaOnnxOfflineTtsMatchaModelConfig(),
-                                kokoro: SherpaOnnxOfflineTtsKokoroModelConfig(),
-                                kitten: kittenConfig,
+                                kokoro: kokoroConfig,
+                                kitten: SherpaOnnxOfflineTtsKittenModelConfig(),
                                 zipvoice: SherpaOnnxOfflineTtsZipvoiceModelConfig()
                             )
 
