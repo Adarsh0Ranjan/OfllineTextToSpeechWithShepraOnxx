@@ -2,19 +2,33 @@ import SwiftUI
 import AVFoundation
 import Combine
 
-class TtsManager: ObservableObject {
+enum Language: String, CaseIterable, Identifiable {
+    case english = "English"
+    case french = "French"
+
+    var id: String { rawValue }
+    var flag: String {
+        switch self {
+        case .english: return "🇺🇸"
+        case .french: return "🇫🇷"
+        }
+    }
+}
+
+class MultiLanguageTtsManager: ObservableObject {
     @Published var status: String = "Ready"
+    @Published var currentLanguage: Language = .english
     @Published var availableVoices: [Int32] = []
 
     private var audioEngine: AVAudioEngine?
     private var playerNode: AVAudioPlayerNode?
-    private var tts: OpaquePointer?
-    private var isInitialized = false
+    private var ttsInstances: [Language: OpaquePointer] = [:]
+    private var voiceCounts: [Language: Int32] = [:]
     private var isPlayerConnected = false
 
     init() {
         setupAudioEngine()
-        initializeTTS()
+        loadAllLanguages()
     }
 
     private func setupAudioEngine() {
@@ -24,58 +38,51 @@ class TtsManager: ObservableObject {
         engine.attach(player)
     }
 
-    private func initializeTTS() {
-        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            guard let self = self else { return }
+    private func loadAllLanguages() {
+        for language in Language.allCases {
+            if initializeTTS(for: language) {
+                print("✅ \(language.rawValue) loaded")
+            }
+        }
 
-            DispatchQueue.main.async { self.status = "Loading model..." }
+        // Set English as default
+        if let voices = voiceCounts[.english] {
+            availableVoices = Array(0..<voices)
+            status = "Ready - English (\(voices) voices)"
+        }
+    }
 
-            let modelURL = Bundle.main.url(forResource: "model_english", withExtension: "onnx")
-            let tokensURL = Bundle.main.url(forResource: "tokens_english", withExtension: "txt")
-            let voicesURL = Bundle.main.url(forResource: "voices_english", withExtension: "bin")
+    private func initializeTTS(for language: Language) -> Bool {
+        guard let resourcePath = Bundle.main.resourceURL else { return false }
+        let espeakDataPath = resourcePath.appendingPathComponent("espeak-ng-data").path
 
-            guard let resourcePath = Bundle.main.resourceURL else {
-                DispatchQueue.main.async { self.status = "Failed to get resource path" }
-                return
+        var tts: OpaquePointer?
+
+        switch language {
+        case .english:
+            // Kokoro model
+            guard let modelURL = Bundle.main.url(forResource: "model_english", withExtension: "onnx"),
+                  let tokensURL = Bundle.main.url(forResource: "tokens_english", withExtension: "txt"),
+                  let voicesURL = Bundle.main.url(forResource: "voices_english", withExtension: "bin") else {
+                print("❌ English: Files not found")
+                return false
             }
 
-            let espeakDataURL = resourcePath.appendingPathComponent("espeak-ng-data")
-
-            var missingFiles: [String] = []
-            if modelURL == nil { missingFiles.append("model.onnx") }
-            if tokensURL == nil { missingFiles.append("tokens") }
-            if voicesURL == nil { missingFiles.append("voices.bin") }
-
-            var isDirectory: ObjCBool = false
-            if !FileManager.default.fileExists(atPath: espeakDataURL.path, isDirectory: &isDirectory) || !isDirectory.boolValue {
-                missingFiles.append("espeak-ng-data directory")
-            }
-
-            if !missingFiles.isEmpty {
-                DispatchQueue.main.async {
-                    self.status = "Missing: \(missingFiles.joined(separator: ", "))"
-                }
-                return
-            }
-
-            let modelPath = modelURL!.path
-            let tokensPath = tokensURL!.path
-            let voicesPath = voicesURL!.path
-            let espeakDataPath = espeakDataURL.path
+            let modelPath = modelURL.path
+            let tokensPath = tokensURL.path
+            let voicesPath = voicesURL.path
 
             espeakDataPath.withCString { cEspeakDataPath in
                 modelPath.withCString { cModelPath in
                     tokensPath.withCString { cTokensPath in
                         voicesPath.withCString { cVoicesPath in
-
                             var kokoroConfig = SherpaOnnxOfflineTtsKokoroModelConfig(
                                 model: cModelPath,
                                 voices: cVoicesPath,
                                 tokens: cTokensPath,
                                 data_dir: cEspeakDataPath,
                                 length_scale: 1.0, dict_dir: nil,
-                                lexicon: nil,
-                                lang: nil
+                                lexicon: nil, lang: nil
                             )
 
                             var modelConfig = SherpaOnnxOfflineTtsModelConfig(
@@ -97,39 +104,91 @@ class TtsManager: ObservableObject {
                                 silence_scale: 0.5
                             )
 
-                            self.tts = SherpaOnnxCreateOfflineTts(&ttsConfig)
-
-                            if self.tts != nil {
-                                self.isInitialized = true
-
-                                // Get number of available speakers
-                                let numSpeakers = SherpaOnnxOfflineTtsNumSpeakers(self.tts)
-                                print("Available speakers: \(numSpeakers)")
-
-                                DispatchQueue.main.async {
-                                    self.availableVoices = Array(0..<numSpeakers)
-                                    self.status = "Ready - \(numSpeakers) voices available"
-                                }
-                            } else {
-                                DispatchQueue.main.async {
-                                    self.status = "Failed to initialize TTS"
-                                }
-                            }
+                            tts = SherpaOnnxCreateOfflineTts(&ttsConfig)
                         }
                     }
                 }
             }
+
+        case .french:
+            // VITS Piper model
+            guard let modelURL = Bundle.main.url(forResource: "model_french", withExtension: "onnx"),
+                  let tokensURL = Bundle.main.url(forResource: "tokens_french", withExtension: "txt") else {
+                print("❌ French: Files not found")
+                return false
+            }
+
+            let modelPath = modelURL.path
+            let tokensPath = tokensURL.path
+
+            espeakDataPath.withCString { cEspeakDataPath in
+                modelPath.withCString { cModelPath in
+                    tokensPath.withCString { cTokensPath in
+                        var vitsConfig = SherpaOnnxOfflineTtsVitsModelConfig(
+                            model: cModelPath,
+                            lexicon: "",
+                            tokens: cTokensPath,
+                            data_dir: cEspeakDataPath,
+                            noise_scale: 0.667,
+                            noise_scale_w: 0.8,
+                            length_scale: 1.0,
+                            dict_dir: ""
+                        )
+
+                        var modelConfig = SherpaOnnxOfflineTtsModelConfig(
+                            vits: vitsConfig,
+                            num_threads: 2,
+                            debug: 0,
+                            provider: "cpu",
+                            matcha: SherpaOnnxOfflineTtsMatchaModelConfig(),
+                            kokoro: SherpaOnnxOfflineTtsKokoroModelConfig(),
+                            kitten: SherpaOnnxOfflineTtsKittenModelConfig(),
+                            zipvoice: SherpaOnnxOfflineTtsZipvoiceModelConfig()
+                        )
+
+                        var ttsConfig = SherpaOnnxOfflineTtsConfig(
+                            model: modelConfig,
+                            rule_fsts: nil,
+                            max_num_sentences: 1,
+                            rule_fars: nil,
+                            silence_scale: 0.5
+                        )
+
+                        tts = SherpaOnnxCreateOfflineTts(&ttsConfig)
+                    }
+                }
+            }
+        }
+
+        if let tts = tts {
+            let numSpeakers = SherpaOnnxOfflineTtsNumSpeakers(tts)
+            ttsInstances[language] = tts
+            voiceCounts[language] = numSpeakers
+            return true
+        }
+
+        return false
+    }
+
+    func switchLanguage(_ language: Language) {
+        currentLanguage = language
+        if let voices = voiceCounts[language] {
+            availableVoices = Array(0..<voices)
+            status = "Ready - \(language.flag) \(language.rawValue) (\(voices) voices)"
+        } else {
+            availableVoices = []
+            status = "\(language.rawValue) not available"
         }
     }
 
     func synthesizeText(_ text: String, voiceId: Int32 = 0, speed: Float = 1.0) {
-        guard isInitialized, let tts = tts else {
-            status = "TTS not initialized"
+        guard let tts = ttsInstances[currentLanguage] else {
+            status = "\(currentLanguage.rawValue) not loaded"
             return
         }
 
         DispatchQueue.main.async {
-            self.status = "Synthesizing with voice \(voiceId)..."
+            self.status = "Speaking \(self.currentLanguage.flag)..."
         }
 
         let sentences = text.components(separatedBy: CharacterSet(charactersIn: ".!?\n"))
@@ -139,9 +198,7 @@ class TtsManager: ObservableObject {
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             guard let self = self else { return }
 
-            let startTime = Date()
-
-            for (index, sentence) in sentences.enumerated() {
+            for sentence in sentences {
                 if sentence.isEmpty { continue }
 
                 guard let generatedAudio = SherpaOnnxOfflineTtsGenerate(tts, sentence, voiceId, speed) else {
@@ -153,20 +210,13 @@ class TtsManager: ObservableObject {
 
                 if let samples = generatedAudio.pointee.samples {
                     self.playAudioStream(from: samples, count: Int(sampleCount), sampleRate: sampleRate)
-
-                    if index == 0 {
-                        let latency = Date().timeIntervalSince(startTime)
-                        DispatchQueue.main.async {
-                            self.status = "Voice \(voiceId) (latency: \(String(format: "%.2f", latency))s)"
-                        }
-                    }
                 }
 
                 SherpaOnnxDestroyOfflineTtsGeneratedAudio(generatedAudio)
             }
 
             DispatchQueue.main.async {
-                self.status = "Ready - \(self.availableVoices.count) voices available"
+                self.status = "Ready - \(self.currentLanguage.flag) \(self.currentLanguage.rawValue)"
             }
         }
     }
@@ -183,7 +233,6 @@ class TtsManager: ObservableObject {
             do {
                 try engine.start()
             } catch {
-                print("Failed to start audio engine: \(error)")
                 return
             }
         }
@@ -208,7 +257,7 @@ class TtsManager: ObservableObject {
     }
 
     deinit {
-        if let tts = tts {
+        for (_, tts) in ttsInstances {
             SherpaOnnxDestroyOfflineTts(tts)
         }
         audioEngine?.stop()
@@ -216,21 +265,34 @@ class TtsManager: ObservableObject {
 }
 
 struct ContentView: View {
-    @StateObject private var ttsManager = TtsManager()
+    @StateObject private var ttsManager = MultiLanguageTtsManager()
     @State private var selectedVoice: Int32 = 0
     @State private var speechSpeed: Float = 1.0
-    @State private var inputText = "Hello! This is a test of text to speech. I am testing different voices."
+    @State private var inputText = "Hello! This is a test."
 
     var body: some View {
         VStack(spacing: 20) {
-            Text("TTS Voice Tester")
+            Text("Multi-Language TTS")
                 .font(.title)
                 .bold()
+
+            // Language selector
+            Picker("Language", selection: $ttsManager.currentLanguage) {
+                ForEach(Language.allCases) { lang in
+                    Text("\(lang.flag) \(lang.rawValue)").tag(lang)
+                }
+            }
+            .pickerStyle(.segmented)
+            .padding(.horizontal)
+            .onChange(of: ttsManager.currentLanguage) { newLang in
+                ttsManager.switchLanguage(newLang)
+                selectedVoice = 0
+            }
 
             // Voice selector
             if !ttsManager.availableVoices.isEmpty {
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("Voice Selection")
+                    Text("Voice: \(selectedVoice)")
                         .font(.headline)
 
                     Picker("Voice", selection: $selectedVoice) {
@@ -247,7 +309,6 @@ struct ContentView: View {
             VStack(alignment: .leading, spacing: 8) {
                 Text("Speed: \(String(format: "%.1f", speechSpeed))x")
                     .font(.headline)
-
                 Slider(value: $speechSpeed, in: 0.5...2.0, step: 0.1)
             }
             .padding(.horizontal)
@@ -272,19 +333,6 @@ struct ContentView: View {
             .foregroundColor(.white)
             .cornerRadius(10)
             .padding(.horizontal)
-
-            // Quick test buttons
-            HStack(spacing: 12) {
-                ForEach(ttsManager.availableVoices.prefix(4), id: \.self) { voiceId in
-                    Button("Test \(voiceId)") {
-                        ttsManager.synthesizeText("This is voice number \(voiceId).", voiceId: voiceId, speed: speechSpeed)
-                    }
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 8)
-                    .background(Color.green.opacity(0.2))
-                    .cornerRadius(8)
-                }
-            }
 
             Text(ttsManager.status)
                 .padding()
