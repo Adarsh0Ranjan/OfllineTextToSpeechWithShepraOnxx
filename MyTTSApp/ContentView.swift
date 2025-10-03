@@ -5,12 +5,14 @@ import Combine
 enum Language: String, CaseIterable, Identifiable {
     case english = "English"
     case french = "French"
+    case arabic = "Arabic"
 
     var id: String { rawValue }
     var flag: String {
         switch self {
         case .english: return "🇺🇸"
         case .french: return "🇫🇷"
+        case .arabic: return "🇸🇦"
         }
     }
 }
@@ -126,13 +128,62 @@ class MultiLanguageTtsManager: ObservableObject {
                     tokensPath.withCString { cTokensPath in
                         var vitsConfig = SherpaOnnxOfflineTtsVitsModelConfig(
                             model: cModelPath,
-                            lexicon: "",
+                            lexicon: nil,
                             tokens: cTokensPath,
                             data_dir: cEspeakDataPath,
                             noise_scale: 0.667,
                             noise_scale_w: 0.8,
                             length_scale: 1.0,
-                            dict_dir: ""
+                            dict_dir: nil
+                        )
+
+                        var modelConfig = SherpaOnnxOfflineTtsModelConfig(
+                            vits: vitsConfig,
+                            num_threads: 2,
+                            debug: 0,
+                            provider: "cpu",
+                            matcha: SherpaOnnxOfflineTtsMatchaModelConfig(),
+                            kokoro: SherpaOnnxOfflineTtsKokoroModelConfig(),
+                            kitten: SherpaOnnxOfflineTtsKittenModelConfig(),
+                            zipvoice: SherpaOnnxOfflineTtsZipvoiceModelConfig()
+                        )
+
+                        var ttsConfig = SherpaOnnxOfflineTtsConfig(
+                            model: modelConfig,
+                            rule_fsts: nil,
+                            max_num_sentences: 1,
+                            rule_fars: nil,
+                            silence_scale: 0.5
+                        )
+
+                        tts = SherpaOnnxCreateOfflineTts(&ttsConfig)
+                    }
+                }
+            }
+
+        case .arabic:
+            // VITS Piper model for Arabic
+            guard let modelURL = Bundle.main.url(forResource: "model_arabic", withExtension: "onnx"),
+                  let tokensURL = Bundle.main.url(forResource: "tokens_arabic", withExtension: "txt") else {
+                print("❌ Arabic: Files not found")
+                return false
+            }
+
+            let modelPath = modelURL.path
+            let tokensPath = tokensURL.path
+
+            espeakDataPath.withCString { cEspeakDataPath in
+                modelPath.withCString { cModelPath in
+                    tokensPath.withCString { cTokensPath in
+                        var vitsConfig = SherpaOnnxOfflineTtsVitsModelConfig(
+                            model: cModelPath,
+                            lexicon: nil,
+                            tokens: cTokensPath,
+                            data_dir: cEspeakDataPath,
+                            noise_scale: 0.667,
+                            noise_scale_w: 0.8,
+                            length_scale: 1.0,
+                            dict_dir: nil
                         )
 
                         var modelConfig = SherpaOnnxOfflineTtsModelConfig(
