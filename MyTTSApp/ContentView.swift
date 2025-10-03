@@ -7,23 +7,30 @@ struct ContentView: View {
     @State private var speechSpeed: Float = 1.0
 
     // A dictionary to hold the simple, 3-line text for each language
+    // A dictionary to hold the simple, 3-line text for each language
     private let sampleTexts: [Language: String] = [
         .english: """
-        Hello, this is a test of the text-to-speech system.
-        I am speaking in English.
-        Have a great day!
-        """,
+    Hello, this is a test of the text-to-speech system.
+    I am speaking in English.
+    Have a great day!
+    """,
         .french: """
-        Bonjour, ceci est un test du système de synthèse vocale.
-        Je parle en français.
-        Passe une bonne journée!
-        """,
+    Bonjour, ceci est un test du système de synthèse vocale.
+    Je parle en français.
+    Passe une bonne journée!
+    """,
         .arabic: """
-        مرحباً، هذا اختبار لنظام تحويل النص إلى كلام.
-        أنا أتحدث باللغة العربية.
-        أتمنى لك يوماً سعيداً!
-        """
+    مرحباً، هذا اختبار لنظام تحويل النص إلى كلام.
+    أنا أتحدث باللغة العربية.
+    أتمنى لك يوماً سعيداً!
+    """,
+        .chinese: """
+    你好，这是一个语音合成系统的测试。
+    我正在说中文。
+    祝你有美好的一天！
+    """
     ]
+
 
     // Initialize inputText directly with the default English text. This is simpler and more reliable.
     @State private var inputText = """

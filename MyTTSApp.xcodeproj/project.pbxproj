@@ -9,6 +9,7 @@
 /* Begin PBXBuildFile section */
 		294B59E92E8D320C00142760 /* libc++.tbd in Frameworks */ = {isa = PBXBuildFile; fileRef = 294B59E82E8D31F000142760 /* libc++.tbd */; };
 		296757072E8DEEFE009A45D1 /* espeak-ng-data in Resources */ = {isa = PBXBuildFile; fileRef = 296757062E8DEEFE009A45D1 /* espeak-ng-data */; };
+		29CFC3652E8FF2E100132FAD /* dict_chinese in Resources */ = {isa = PBXBuildFile; fileRef = 29CFC3642E8FF2E100132FAD /* dict_chinese */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXCopyFilesBuildPhase section */
@@ -28,6 +29,7 @@
 		294B59E82E8D31F000142760 /* libc++.tbd */ = {isa = PBXFileReference; lastKnownFileType = "sourcecode.text-based-dylib-definition"; name = "libc++.tbd"; path = "usr/lib/libc++.tbd"; sourceTree = SDKROOT; };
 		296757062E8DEEFE009A45D1 /* espeak-ng-data */ = {isa = PBXFileReference; lastKnownFileType = folder; name = "espeak-ng-data"; path = "MyTTSApp/Models/espeak-ng-data"; sourceTree = "<group>"; };
 		29BBA5512E8D128A0024DF7C /* MyTTSApp.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = MyTTSApp.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		29CFC3642E8FF2E100132FAD /* dict_chinese */ = {isa = PBXFileReference; lastKnownFileType = folder; name = dict_chinese; path = "MyTTSApp/Models/Chinese/vits-melo-tts-zh_en/dict_chinese"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedGroupBuildPhaseMembershipExceptionSet section */
@@ -79,6 +81,7 @@
 		29BBA5482E8D128A0024DF7C = {
 			isa = PBXGroup;
 			children = (
+				29CFC3642E8FF2E100132FAD /* dict_chinese */,
 				296757062E8DEEFE009A45D1 /* espeak-ng-data */,
 				29BBA5532E8D128A0024DF7C /* MyTTSApp */,
 				294B59E72E8D31F000142760 /* Frameworks */,
@@ -159,6 +162,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				29CFC3652E8FF2E100132FAD /* dict_chinese in Resources */,
 				296757072E8DEEFE009A45D1 /* espeak-ng-data in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

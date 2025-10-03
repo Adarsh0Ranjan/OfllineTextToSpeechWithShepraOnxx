@@ -201,6 +201,74 @@ class MultiLanguageTtsManager: ObservableObject {
                     }
                 }
             }
+        case .chinese:
+            // VITS MeloTTS model (end-to-end, no espeak-ng)
+            guard let modelURL = Bundle.main.url(forResource: "model_chinese", withExtension: "onnx"),
+                  let tokensURL = Bundle.main.url(forResource: "tokens_chinese", withExtension: "txt"),
+                  let lexiconURL = Bundle.main.url(forResource: "lexicon_chinese", withExtension: "txt") else {
+                print("❌ Chinese: A required file (model, tokens, or lexicon) was not found.")
+                return false
+            }
+
+            // Get the path to the 'dict_chinese' directory from the main bundle resource path
+            guard let resourcePath = Bundle.main.resourceURL else {
+                print("❌ Chinese: Failed to get resource path")
+                return false
+            }
+            let dictDirURL = resourcePath.appendingPathComponent("dict_chinese")
+
+            // Verify the directory exists
+            var isDirectory: ObjCBool = false
+            guard FileManager.default.fileExists(atPath: dictDirURL.path, isDirectory: &isDirectory), isDirectory.boolValue else {
+                print("❌ Chinese: The 'dict_chinese' directory was not found in your app bundle.")
+                return false
+            }
+
+            let modelPath = modelURL.path
+            let tokensPath = tokensURL.path
+            let lexiconPath = lexiconURL.path
+            let dictDirPath = dictDirURL.path
+
+            // Note: data_dir is nil because this model does not use espeak-ng
+            modelPath.withCString { cModelPath in
+                tokensPath.withCString { cTokensPath in
+                    lexiconPath.withCString { cLexiconPath in
+                        dictDirPath.withCString { cDictDirPath in
+                            var vitsConfig = SherpaOnnxOfflineTtsVitsModelConfig(
+                                model: cModelPath,
+                                lexicon: cLexiconPath,
+                                tokens: cTokensPath,
+                                data_dir: nil, // NO espeak-ng-data needed
+                                noise_scale: 0.667,
+                                noise_scale_w: 0.8,
+                                length_scale: 1.0,
+                                dict_dir: cDictDirPath // Path to the Jieba dictionary
+                            )
+
+                            var modelConfig = SherpaOnnxOfflineTtsModelConfig(
+                                vits: vitsConfig,
+                                num_threads: 2,
+                                debug: 1, // Use 1 for debugging if it crashes
+                                provider: "cpu",
+                                matcha: SherpaOnnxOfflineTtsMatchaModelConfig(),
+                                kokoro: SherpaOnnxOfflineTtsKokoroModelConfig(),
+                                kitten: SherpaOnnxOfflineTtsKittenModelConfig(),
+                                zipvoice: SherpaOnnxOfflineTtsZipvoiceModelConfig()
+                            )
+
+                            var ttsConfig = SherpaOnnxOfflineTtsConfig(
+                                model: modelConfig,
+                                rule_fsts: nil,
+                                max_num_sentences: 1,
+                                rule_fars: nil,
+                                silence_scale: 0.5
+                            )
+
+                            tts = SherpaOnnxCreateOfflineTts(&ttsConfig)
+                        }
+                    }
+                }
+            }
         }
 
         if let tts = tts {
@@ -295,6 +363,9 @@ class MultiLanguageTtsManager: ObservableObject {
         player.scheduleBuffer(buffer, completionHandler: nil)
 
         if !player.isPlaying {
+            if currentLanguage == .chinese {
+                player.volume = 18
+            }
             player.play()
         }
     }
