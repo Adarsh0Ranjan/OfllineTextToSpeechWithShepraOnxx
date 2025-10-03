@@ -1,13 +1,12 @@
-
 import SwiftUI
 
 struct ContentView: View {
     @StateObject private var ttsManager = MultiLanguageTtsManager()
     @State private var selectedVoice: Int32 = 0
     @State private var speechSpeed: Float = 1.0
+    @State private var inputText = "Hello! This is a test."
 
-    // A dictionary to hold the simple, 3-line text for each language
-    // A dictionary to hold the simple, 3-line text for each language
+    // Provide default sample texts per language
     private let sampleTexts: [Language: String] = [
         .english: """
     Hello, this is a test of the text-to-speech system.
@@ -31,14 +30,6 @@ struct ContentView: View {
     """
     ]
 
-
-    // Initialize inputText directly with the default English text. This is simpler and more reliable.
-    @State private var inputText = """
-    Hello, this is a test of the text-to-speech system.
-    I am speaking in English.
-    Have a great day!
-    """
-
     var body: some View {
         VStack(spacing: 20) {
             Text("Multi-Language TTS")
@@ -56,8 +47,9 @@ struct ContentView: View {
             .onChange(of: ttsManager.currentLanguage) { newLang in
                 ttsManager.switchLanguage(newLang)
                 selectedVoice = 0
-                // Update the inputText to the sample text for the new language
-                inputText = sampleTexts[newLang] ?? ""
+                if let sample = sampleTexts[newLang] {
+                    inputText = sample
+                }
             }
 
             // Voice selector
@@ -76,7 +68,7 @@ struct ContentView: View {
                 .padding(.horizontal)
             }
 
-            // Speed control
+            // Speed slider
             VStack(alignment: .leading, spacing: 8) {
                 Text("Speed: \(String(format: "%.1f", speechSpeed))x")
                     .font(.headline)
@@ -84,9 +76,9 @@ struct ContentView: View {
             }
             .padding(.horizontal)
 
-            // Text input
+            // Text editor for input
             TextEditor(text: $inputText)
-                .frame(height: 120) // Adjusted height for 3 lines
+                .frame(height: 100)
                 .padding(4)
                 .overlay(
                     RoundedRectangle(cornerRadius: 8)
@@ -105,6 +97,7 @@ struct ContentView: View {
             .cornerRadius(10)
             .padding(.horizontal)
 
+            // Status display
             Text(ttsManager.status)
                 .padding()
                 .multilineTextAlignment(.center)

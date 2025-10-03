@@ -1,11 +1,4 @@
-//
-//  MultiLanguageTtsManager.swift
-//  MyTTSApp
-//
-//  Created by Adarsh Ranjan on 03/10/25.
-//
-
-import Foundation
+import SwiftUI
 import AVFoundation
 import Combine
 
@@ -18,35 +11,45 @@ class MultiLanguageTtsManager: ObservableObject {
     private var playerNode: AVAudioPlayerNode?
     private var ttsInstances: [Language: OpaquePointer] = [:]
     private var voiceCounts: [Language: Int32] = [:]
-    private var isPlayerConnected = false
 
     init() {
-        setupAudioEngine()
-        loadAllLanguages()
-    }
-
-    private func setupAudioEngine() {
-        audioEngine = AVAudioEngine()
-        playerNode = AVAudioPlayerNode()
-        guard let engine = audioEngine, let player = playerNode else { return }
-        engine.attach(player)
-    }
-
-    private func loadAllLanguages() {
-        for language in Language.allCases {
-            if initializeTTS(for: language) {
-                print("✅ \(language.rawValue) loaded")
+        // Only load English on startup
+        if initializeTTS(for: .english) {
+            if let voices = voiceCounts[.english] {
+                availableVoices = Array(0..<voices)
+                status = "Ready - English (\(voices) voices)"
             }
         }
 
-        // Set English as default
-        if let voices = voiceCounts[.english] {
-            availableVoices = Array(0..<voices)
-            status = "Ready - English (\(voices) voices)"
+        // Setup audio engine for English
+        setupAudioEngine()
+    }
+
+    private func setupAudioEngine() {
+        // Clean up existing engine if any
+        if let engine = audioEngine {
+            engine.stop()
+            if let player = playerNode {
+                engine.detach(player)
+            }
         }
+
+        // Create fresh engine
+        audioEngine = AVAudioEngine()
+        playerNode = AVAudioPlayerNode()
+
+        guard let engine = audioEngine, let player = playerNode else { return }
+        engine.attach(player)
+
+        print("🔄 Audio engine reset for \(currentLanguage.rawValue)")
     }
 
     private func initializeTTS(for language: Language) -> Bool {
+        // Return if already loaded
+        if ttsInstances[language] != nil {
+            return true
+        }
+
         guard let resourcePath = Bundle.main.resourceURL else { return false }
         let espeakDataPath = resourcePath.appendingPathComponent("espeak-ng-data").path
 
@@ -54,7 +57,6 @@ class MultiLanguageTtsManager: ObservableObject {
 
         switch language {
         case .english:
-            // Kokoro model
             guard let modelURL = Bundle.main.url(forResource: "model_english", withExtension: "onnx"),
                   let tokensURL = Bundle.main.url(forResource: "tokens_english", withExtension: "txt"),
                   let voicesURL = Bundle.main.url(forResource: "voices_english", withExtension: "bin") else {
@@ -75,8 +77,10 @@ class MultiLanguageTtsManager: ObservableObject {
                                 voices: cVoicesPath,
                                 tokens: cTokensPath,
                                 data_dir: cEspeakDataPath,
-                                length_scale: 1.0, dict_dir: nil,
-                                lexicon: nil, lang: nil
+                                length_scale: 1.0,
+                                dict_dir: nil,
+                                lexicon: nil,
+                                lang: nil
                             )
 
                             var modelConfig = SherpaOnnxOfflineTtsModelConfig(
@@ -105,7 +109,6 @@ class MultiLanguageTtsManager: ObservableObject {
             }
 
         case .french:
-            // VITS Piper model
             guard let modelURL = Bundle.main.url(forResource: "model_french", withExtension: "onnx"),
                   let tokensURL = Bundle.main.url(forResource: "tokens_french", withExtension: "txt") else {
                 print("❌ French: Files not found")
@@ -153,8 +156,68 @@ class MultiLanguageTtsManager: ObservableObject {
                 }
             }
 
+        case .chinese:
+            guard let modelURL = Bundle.main.url(forResource: "model_chinese", withExtension: "onnx"),
+                  let tokensURL = Bundle.main.url(forResource: "tokens_chinese", withExtension: "txt"),
+                  let lexiconURL = Bundle.main.url(forResource: "lexicon_chinese", withExtension: "txt") else {
+                print("❌ Chinese: Files not found")
+                return false
+            }
+
+            let dictDirURL = resourcePath.appendingPathComponent("dict_chinese")
+
+            var isDirectory: ObjCBool = false
+            guard FileManager.default.fileExists(atPath: dictDirURL.path, isDirectory: &isDirectory), isDirectory.boolValue else {
+                print("❌ Chinese: dict_chinese directory not found")
+                return false
+            }
+
+            let modelPath = modelURL.path
+            let tokensPath = tokensURL.path
+            let lexiconPath = lexiconURL.path
+            let dictDirPath = dictDirURL.path
+
+            modelPath.withCString { cModelPath in
+                tokensPath.withCString { cTokensPath in
+                    lexiconPath.withCString { cLexiconPath in
+                        dictDirPath.withCString { cDictDirPath in
+                            var vitsConfig = SherpaOnnxOfflineTtsVitsModelConfig(
+                                model: cModelPath,
+                                lexicon: cLexiconPath,
+                                tokens: cTokensPath,
+                                data_dir: nil,
+                                noise_scale: 0.667,
+                                noise_scale_w: 0.8,
+                                length_scale: 1.0,
+                                dict_dir: cDictDirPath
+                            )
+
+                            var modelConfig = SherpaOnnxOfflineTtsModelConfig(
+                                vits: vitsConfig,
+                                num_threads: 2,
+                                debug: 0,
+                                provider: "cpu",
+                                matcha: SherpaOnnxOfflineTtsMatchaModelConfig(),
+                                kokoro: SherpaOnnxOfflineTtsKokoroModelConfig(),
+                                kitten: SherpaOnnxOfflineTtsKittenModelConfig(),
+                                zipvoice: SherpaOnnxOfflineTtsZipvoiceModelConfig()
+                            )
+
+                            var ttsConfig = SherpaOnnxOfflineTtsConfig(
+                                model: modelConfig,
+                                rule_fsts: nil,
+                                max_num_sentences: 1,
+                                rule_fars: nil,
+                                silence_scale: 0.5
+                            )
+
+                            tts = SherpaOnnxCreateOfflineTts(&ttsConfig)
+                        }
+                    }
+                }
+            }
+
         case .arabic:
-            // VITS Piper model for Arabic
             guard let modelURL = Bundle.main.url(forResource: "model_arabic", withExtension: "onnx"),
                   let tokensURL = Bundle.main.url(forResource: "tokens_arabic", withExtension: "txt") else {
                 print("❌ Arabic: Files not found")
@@ -201,80 +264,13 @@ class MultiLanguageTtsManager: ObservableObject {
                     }
                 }
             }
-        case .chinese:
-            // VITS MeloTTS model (end-to-end, no espeak-ng)
-            guard let modelURL = Bundle.main.url(forResource: "model_chinese", withExtension: "onnx"),
-                  let tokensURL = Bundle.main.url(forResource: "tokens_chinese", withExtension: "txt"),
-                  let lexiconURL = Bundle.main.url(forResource: "lexicon_chinese", withExtension: "txt") else {
-                print("❌ Chinese: A required file (model, tokens, or lexicon) was not found.")
-                return false
-            }
-
-            // Get the path to the 'dict_chinese' directory from the main bundle resource path
-            guard let resourcePath = Bundle.main.resourceURL else {
-                print("❌ Chinese: Failed to get resource path")
-                return false
-            }
-            let dictDirURL = resourcePath.appendingPathComponent("dict_chinese")
-
-            // Verify the directory exists
-            var isDirectory: ObjCBool = false
-            guard FileManager.default.fileExists(atPath: dictDirURL.path, isDirectory: &isDirectory), isDirectory.boolValue else {
-                print("❌ Chinese: The 'dict_chinese' directory was not found in your app bundle.")
-                return false
-            }
-
-            let modelPath = modelURL.path
-            let tokensPath = tokensURL.path
-            let lexiconPath = lexiconURL.path
-            let dictDirPath = dictDirURL.path
-
-            // Note: data_dir is nil because this model does not use espeak-ng
-            modelPath.withCString { cModelPath in
-                tokensPath.withCString { cTokensPath in
-                    lexiconPath.withCString { cLexiconPath in
-                        dictDirPath.withCString { cDictDirPath in
-                            var vitsConfig = SherpaOnnxOfflineTtsVitsModelConfig(
-                                model: cModelPath,
-                                lexicon: cLexiconPath,
-                                tokens: cTokensPath,
-                                data_dir: nil, // NO espeak-ng-data needed
-                                noise_scale: 0.667,
-                                noise_scale_w: 0.8,
-                                length_scale: 1.0,
-                                dict_dir: cDictDirPath // Path to the Jieba dictionary
-                            )
-
-                            var modelConfig = SherpaOnnxOfflineTtsModelConfig(
-                                vits: vitsConfig,
-                                num_threads: 2,
-                                debug: 1, // Use 1 for debugging if it crashes
-                                provider: "cpu",
-                                matcha: SherpaOnnxOfflineTtsMatchaModelConfig(),
-                                kokoro: SherpaOnnxOfflineTtsKokoroModelConfig(),
-                                kitten: SherpaOnnxOfflineTtsKittenModelConfig(),
-                                zipvoice: SherpaOnnxOfflineTtsZipvoiceModelConfig()
-                            )
-
-                            var ttsConfig = SherpaOnnxOfflineTtsConfig(
-                                model: modelConfig,
-                                rule_fsts: nil,
-                                max_num_sentences: 1,
-                                rule_fars: nil,
-                                silence_scale: 0.5
-                            )
-
-                            tts = SherpaOnnxCreateOfflineTts(&ttsConfig)
-                        }
-                    }
-                }
-            }
         }
 
         if let tts = tts {
             let numSpeakers = SherpaOnnxOfflineTtsNumSpeakers(tts)
             ttsInstances[language] = tts
             voiceCounts[language] = numSpeakers
+            print("✅ \(language.rawValue) loaded (\(numSpeakers) voices)")
             return true
         }
 
@@ -283,13 +279,35 @@ class MultiLanguageTtsManager: ObservableObject {
 
     func switchLanguage(_ language: Language) {
         currentLanguage = language
-        if let voices = voiceCounts[language] {
-            availableVoices = Array(0..<voices)
-            status = "Ready - \(language.flag) \(language.rawValue) (\(voices) voices)"
+
+        // Load model if not already loaded
+        if ttsInstances[language] == nil {
+            status = "Loading \(language.flag) \(language.rawValue)..."
+            DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+                guard let self = self else { return }
+
+                let success = self.initializeTTS(for: language)
+
+                DispatchQueue.main.async {
+                    if success, let voices = self.voiceCounts[language] {
+                        self.availableVoices = Array(0..<voices)
+                        self.status = "Ready - \(language.flag) \(language.rawValue) (\(voices) voices)"
+                    } else {
+                        self.status = "\(language.rawValue) failed to load"
+                        self.availableVoices = []
+                    }
+                }
+            }
         } else {
-            availableVoices = []
-            status = "\(language.rawValue) not available"
+            // Already loaded
+            if let voices = voiceCounts[language] {
+                availableVoices = Array(0..<voices)
+                status = "Ready - \(language.flag) \(language.rawValue) (\(voices) voices)"
+            }
         }
+
+        // CRITICAL: Reset audio engine for new language
+        setupAudioEngine()
     }
 
     func synthesizeText(_ text: String, voiceId: Int32 = 0, speed: Float = 1.0) {
@@ -337,13 +355,15 @@ class MultiLanguageTtsManager: ObservableObject {
 
         let format = AVAudioFormat(standardFormatWithSampleRate: Double(sampleRate), channels: 1)!
 
-        if !isPlayerConnected {
+        // Connect and start engine with correct format
+        if !engine.isRunning {
             engine.connect(player, to: engine.mainMixerNode, format: format)
-            isPlayerConnected = true
 
             do {
                 try engine.start()
+                print("✅ Audio engine started with sample rate: \(sampleRate)")
             } catch {
+                print("❌ Failed to start engine: \(error)")
                 return
             }
         }
@@ -363,9 +383,6 @@ class MultiLanguageTtsManager: ObservableObject {
         player.scheduleBuffer(buffer, completionHandler: nil)
 
         if !player.isPlaying {
-            if currentLanguage == .chinese {
-                player.volume = 18
-            }
             player.play()
         }
     }
